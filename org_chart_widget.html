@@ -1,0 +1,156 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html>
+<head>
+  <title>Org Chart Widget for Grist</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <style>
+    .org-chart {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    .employee-card {
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 10px;
+      margin: 10px;
+      text-align: center;
+      width: 150px;
+      background: #f9f9f9;
+    }
+    .employee-card img {
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+    .employee-card h4 {
+      margin: 10px 0 5px;
+      font-size: 14px;
+    }
+    .employee-card p {
+      margin: 0;
+      font-size: 12px;
+      color: #666;
+    }
+    .level {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .connector {
+      border-top: 2px solid #ccc;
+      width: 100px;
+      margin: 0 auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="org-chart" id="org-chart"></div>
+
+  <script>
+    grist.ready({
+      columns: [
+        { name: 'Name', title: 'Name', type: 'Text', description: 'Employee name' },
+        { name: 'Position', title: 'Position', type: 'Text', description: 'Job title', optional: true },
+        { name: 'Photo', title: 'Photo', type: 'Text', description: 'URL of employee photo', optional: true },
+        { name: 'Manager', title: 'Manager', type: 'Text', description: 'Name of manager', optional: true }
+      ],
+      requiredAccess: 'read table'
+    });
+
+    grist.onRecords(function(records, mappings) {
+      const orgChart = document.getElementById('org-chart');
+      orgChart.innerHTML = '';
+
+      const mappedRecords = records.map(record => grist.mapColumnNames(record));
+      const hierarchy = buildHierarchy(mappedRecords);
+
+      renderOrgChart(hierarchy, orgChart, 0);
+    });
+
+    function buildHierarchy(records) {
+      const employeeMap = new Map();
+      records.forEach(record => {
+        employeeMap.set(record.Name, { ...record, reports: [] });
+      });
+
+      const root = [];
+      records.forEach(record => {
+        if (!record.Manager || !employeeMap.has(record.Manager)) {
+          root.push(employeeMap.get(record.Name));
+        } else {
+          employeeMap.get(record.Manager).reports.push(employeeMap.get(record.Name));
+        }
+      });
+
+      return root;
+    }
+
+    function renderOrgChart(nodes, parentElement, level) {
+      const levelDiv = document.createElement('div');
+      levelDiv.className = 'level';
+      parentElement.appendChild(levelDiv);
+
+      nodes.forEach(node => {
+        const card = document.createElement('div');
+        card.className = 'employee-card';
+        card.innerHTML = `
+          ${node.Photo ? `<img src="${node.Photo}" alt="${node.Name}" />` : ''}
+          <h4>${node.Name}</h4>
+          <p>${node.Position || ''}</p>
+        `;
+        levelDiv.appendChild(card);
+
+        if (node.reports.length > 0) {
+          const connector = document.createElement('div');
+          connector.className = 'connector';
+          parentElement.appendChild(connector);
+          renderOrgChart(node.reports, parentElement, level + 1);
+        }
+      });
+    }
+  </script>
+</body>
+</html>
